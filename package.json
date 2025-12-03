@@ -1,0 +1,30 @@
+{
+  "name": "sms-marketing-backend",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "prisma:init": "prisma init --datasource-provider postgresql",
+    "prisma:migrate": "node scripts/migrate.js",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:generate": "prisma generate",
+    "prisma:studio": "prisma studio",
+    "start": "npm run start --prefix apps/api",
+    "start:all": "npm run start:all --prefix apps/api",
+    "start:server-only": "npm run start:server-only --prefix apps/api",
+    "dev": "npm run dev --prefix apps/api",
+    "worker:sms": "npm run worker:sms --prefix apps/api",
+    "worker:scheduler": "npm run worker:scheduler --prefix apps/api"
+  },
+  "keywords": [],
+  "author": "Konstantinos Pechlivanidis",
+  "license": "ISC",
+  "devDependencies": {
+    "prisma": "^6.16.1"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.1"
+  }
+}

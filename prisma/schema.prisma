@@ -1,0 +1,723 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled — runtime queries
+  directUrl = env("DIRECT_DATABASE_URL") // direct — migrations
+}
+
+model Bootstrap {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Auth tokens
+  tokens RefreshToken[]
+
+  // Optional profile
+  senderName String? @db.VarChar(11) // default SMS sender (3-11 alphanumeric)
+  company    String? @db.VarChar(160)
+  timezone   String? @db.VarChar(50) // IANA timezone (e.g. "Europe/Athens", "America/New_York")
+
+  // Subscription fields
+  stripeCustomerId        String?              @db.VarChar(255)
+  stripeSubscriptionId    String?              @db.VarChar(255)
+  planType                SubscriptionPlanType?
+  subscriptionStatus      SubscriptionStatus   @default(inactive)
+  lastFreeCreditsAllocatedAt DateTime?
+
+  // Back-relations (named where needed)
+  ownedCampaigns    Campaign[]          @relation("CampaignOwner")
+  createdCampaigns  Campaign[]          @relation("CampaignCreator")
+  contacts          Contact[]
+  lists             List[]
+  templates         MessageTemplate[]
+  messages          CampaignMessage[]
+  redemptions       Redemption[]
+  Wallet            Wallet?
+  CreditTransaction CreditTransaction[]
+  Purchase          Purchase[]
+  nfcTags           NfcTag[]            @relation("NfcTagCreator")
+  nfcTagStores      NfcTag[]            @relation("NfcTagStore")
+  nfcScans          NfcScan[]           @relation("NfcScanStore")
+  formConfigs       FormConfig[]        @relation("FormConfigStore")
+  automations       Automation[]
+  conversionEvents  ConversionEvent[]   @relation("ConversionEventStore")
+  offerViewEvents   OfferViewEvent[]
+  automationMessages AutomationMessage[]
+  automationRedemptions AutomationRedemption[]
+
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
+  @@index([subscriptionStatus])
+}
+
+model RefreshToken {
+  id        Int       @id @default(autoincrement())
+  token     String    @unique
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}
+
+enum Gender {
+  male
+  female
+  other
+  prefer_not_to_say
+}
+
+model Contact {
+  id Int @id @default(autoincrement())
+
+  // OWNER SCOPE
+  ownerId Int
+  owner   User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  phone     String // E.164 format (e.g., +306984303406)
+  email     String?   @db.VarChar(320)
+  firstName String?   @db.VarChar(120)
+  lastName  String?   @db.VarChar(120)
+  gender    Gender?
+  birthday  DateTime? // For age calculation
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // subscription state
+  isSubscribed         Boolean   @default(true)
+  unsubscribeTokenHash String?   @db.VarChar(64)
+  unsubscribedAt       DateTime?
+
+  memberships      ListMembership[]
+  messages         CampaignMessage[]
+  automationMessages AutomationMessage[]
+  nfcScans         NfcScan[]
+  conversionEvents ConversionEvent[]
+  offerViewEvents  OfferViewEvent[]
+
+  @@unique([ownerId, phone]) // unique per owner
+  @@index([unsubscribeTokenHash])
+  @@index([ownerId])
+  @@index([unsubscribedAt])
+  @@index([isSubscribed])
+  @@index([gender])
+  @@index([birthday])
+  @@index([ownerId, gender]) // Composite for gender-based segmentation
+}
+
+model List {
+  id Int @id @default(autoincrement())
+
+  // OWNER SCOPE
+  ownerId Int
+  owner   User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  name        String  @db.VarChar(160)
+  description String? @db.VarChar(400)
+
+  // Dynamic segmentation filters
+  filterGender Gender? // Filter by gender (null = all genders)
+  filterAgeMin Int? // Minimum age (null = no minimum)
+  filterAgeMax Int? // Maximum age (null = no maximum)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships ListMembership[]
+  campaigns   Campaign[]
+
+  @@unique([ownerId, name]) // unique per owner
+  @@index([ownerId])
+  @@index([ownerId, filterGender]) // Composite for gender filtering
+}
+
+model ListMembership {
+  id        Int      @id @default(autoincrement())
+  listId    Int
+  contactId Int
+  createdAt DateTime @default(now())
+
+  list    List    @relation(fields: [listId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, contactId])
+  @@index([contactId])
+  @@index([listId])
+}
+
+enum CampaignStatus {
+  draft
+  scheduled
+  sending
+  paused
+  completed
+  failed
+}
+
+enum TemplateCategory {
+  cafe
+  restaurant
+  gym
+  sports_club
+  generic
+}
+
+model MessageTemplate {
+  id Int @id @default(autoincrement())
+
+  // OWNER SCOPE (system user for global templates)
+  ownerId Int
+  owner   User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  name String
+  text String // SMS content with {{first_name}} and {{last_name}} placeholders
+
+  // System template metadata
+  category         TemplateCategory @default(generic) // Business type / scenario
+  goal             String?          @db.VarChar(200) // Use case description
+  suggestedMetrics String?          @db.VarChar(500) // Suggested KPIs to watch
+  language         String           @default("en") // "en" or "gr" for i18n support
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaigns Campaign[]
+
+  @@unique([ownerId, name]) // template names unique per owner
+  @@index([ownerId])
+  @@index([category]) // For filtering by business type
+  @@index([language]) // For filtering by language
+}
+
+enum AgeGroup {
+  age_18_24
+  age_25_39
+  age_40_plus
+}
+
+model Campaign {
+  id Int @id @default(autoincrement())
+
+  // OWNER SCOPE
+  ownerId Int
+  owner   User @relation(name: "CampaignOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  name       String
+  templateId Int
+  template   MessageTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  // Optional custom message text (overrides template text if provided)
+  messageText String? @db.Text
+
+  // Legacy list support (optional for backward compatibility)
+  listId Int?
+  list   List? @relation(fields: [listId], references: [id], onDelete: Restrict)
+
+  // System-defined segmentation filters
+  filterGender   Gender? // null = Any, otherwise filter by gender
+  filterAgeGroup AgeGroup? // null = Any, otherwise filter by age group
+
+  status      CampaignStatus @default(draft)
+  scheduledAt DateTime?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  total       Int            @default(0)
+  sent        Int            @default(0)
+  failed      Int            @default(0)
+
+  createdById Int
+  createdBy   User @relation(name: "CampaignCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  messages         CampaignMessage[]
+  nfcTags          NfcTag[]
+  conversionEvents ConversionEvent[]
+  offerViewEvents  OfferViewEvent[]
+
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([createdAt])
+  @@index([ownerId])
+  @@index([ownerId, status]) // Composite for filtered campaign queries
+  @@index([filterGender])
+  @@index([filterAgeGroup])
+}
+
+enum MessageStatus {
+  queued
+  sent
+  failed
+}
+
+model CampaignMessage {
+  id Int @id @default(autoincrement())
+
+  // OWNER SCOPE
+  ownerId Int
+  owner   User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  campaignId Int
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  contactId Int
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  to   String
+  text String @default("") @db.Text
+
+  trackingId String @unique // unique QR/link id per message
+
+  status MessageStatus @default(queued)
+
+  providerMessageId String?
+  error             String?
+  createdAt         DateTime  @default(now())
+  sentAt            DateTime?
+  failedAt          DateTime?
+
+  redemption       Redemption?
+  conversionEvents ConversionEvent[]
+  offerViewEvents  OfferViewEvent[]
+
+  @@index([campaignId])
+  @@index([contactId])
+  @@index([status])
+  @@index([providerMessageId])
+  @@index([ownerId])
+  @@index([sentAt])
+  @@index([failedAt])
+  @@index([ownerId, campaignId]) // Composite for common query pattern
+  @@index([ownerId, status]) // Composite for filtered status queries
+}
+
+model Redemption {
+  messageId Int             @id
+  message   CampaignMessage @relation(fields: [messageId], references: [id])
+
+  campaignId Int
+  contactId  Int
+
+  // OWNER SCOPE
+  ownerId Int
+  owner   User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  redeemedAt       DateTime @default(now())
+  redeemedByUserId Int?
+  evidenceJson     Json?
+
+  @@index([campaignId])
+  @@index([contactId])
+  @@index([ownerId])
+  @@index([ownerId, campaignId]) // Composite for stats queries
+}
+
+model WebhookEvent {
+  id                Int      @id @default(autoincrement())
+  provider          String
+  eventType         String
+  receivedAt        DateTime @default(now())
+  payload           Json
+  providerMessageId String?
+
+  @@index([provider, eventType])
+  @@index([providerMessageId])
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  failed
+  refunded
+}
+
+enum CreditTxnType {
+  credit // e.g. admin topup, purchase
+  debit // e.g. campaign enqueue
+  refund // e.g. immediate provider hard-fail
+}
+
+enum SubscriptionPlanType {
+  starter
+  pro
+}
+
+enum SubscriptionStatus {
+  active
+  inactive
+  cancelled
+}
+
+model Wallet {
+  id        Int      @id @default(autoincrement())
+  ownerId   Int      @unique
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  balance   Int      @default(0) // credits balance
+  updatedAt DateTime @updatedAt
+
+  transactions CreditTransaction[]
+}
+
+model CreditTransaction {
+  id           Int           @id @default(autoincrement())
+  ownerId      Int
+  owner        User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  type         CreditTxnType
+  amount       Int // positive integer (credits)
+  balanceAfter Int // snapshot of wallet balance after this txn
+  reason       String?       @db.VarChar(200)
+  campaignId   Int?
+  messageId    Int?
+  meta         Json?
+  createdAt    DateTime      @default(now())
+  Wallet       Wallet?       @relation(fields: [walletId], references: [id])
+  walletId     Int?
+
+  @@index([ownerId])
+  @@index([campaignId])
+  @@index([messageId])
+  @@index([walletId])
+  @@index([createdAt])
+}
+
+model Package {
+  id         Int        @id @default(autoincrement())
+  name       String     @unique
+  units      Int // credits included
+  priceCents Int // price in cents (for reference)
+  active     Boolean    @default(true)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  Purchase   Purchase[]
+
+  // Stripe price IDs (optional, can be set via env or admin)
+  stripePriceIdEur String? @db.VarChar(255)
+  stripePriceIdUsd String? @db.VarChar(255)
+
+  @@index([stripePriceIdEur])
+  @@index([stripePriceIdUsd])
+}
+
+model Purchase {
+  id         Int           @id @default(autoincrement())
+  ownerId    Int
+  owner      User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  packageId  Int
+  package    Package       @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  units      Int
+  priceCents Int
+  status     PaymentStatus @default(pending) // pending -> paid via webhook
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  // Stripe integration
+  stripeSessionId       String? @unique @db.VarChar(255)
+  stripePaymentIntentId String? @db.VarChar(255)
+  stripeCustomerId      String? @db.VarChar(255)
+  stripePriceId         String? @db.VarChar(255)
+  currency              String? @db.VarChar(3) // EUR, USD, etc.
+
+  @@index([ownerId])
+  @@index([packageId])
+  @@index([stripeSessionId])
+  @@index([stripePaymentIntentId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([ownerId, status]) // Composite index for common query pattern
+}
+
+enum NfcTagStatus {
+  active
+  inactive
+  test
+}
+
+enum NfcTagType {
+  opt_in
+  conversion
+}
+
+model NfcTag {
+  id Int @id @default(autoincrement())
+
+  // Public identifier (URL-safe, unique)
+  publicId String @unique
+
+  // STORE SCOPE (User.id represents the store)
+  storeId Int
+  store   User @relation("NfcTagStore", fields: [storeId], references: [id], onDelete: Cascade)
+
+  // Optional campaign reference
+  campaignId Int?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  // Human-readable label (e.g., "Checkout Desk 1")
+  label String @db.VarChar(200)
+
+  // Type: opt_in for contact creation, conversion for visit confirmation
+  type NfcTagType @default(opt_in)
+
+  // Status
+  status NfcTagStatus @default(active)
+
+  // Optional form configuration
+  formConfigId Int?
+  formConfig   FormConfig? @relation(fields: [formConfigId], references: [id], onDelete: SetNull)
+
+  // Timestamps and audit
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById Int
+  createdBy   User     @relation("NfcTagCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  // Relations
+  scans            NfcScan[]
+  conversionEvents ConversionEvent[]
+
+  @@index([storeId])
+  @@index([publicId])
+  @@index([status])
+  @@index([campaignId])
+  @@index([type])
+}
+
+enum NfcScanStatus {
+  opened
+  submitted
+  error
+}
+
+model NfcScan {
+  id Int @id @default(autoincrement())
+
+  // NFC tag reference
+  tagId Int
+  tag   NfcTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  // STORE SCOPE
+  storeId Int
+  store   User @relation("NfcScanStore", fields: [storeId], references: [id], onDelete: Cascade)
+
+  // Optional contact reference (if form was submitted)
+  contactId Int?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  // Status
+  status NfcScanStatus @default(opened)
+
+  // Technical data for analytics
+  ipAddress  String? @db.VarChar(45) // IPv4 or IPv6
+  userAgent  String? @db.VarChar(500)
+  deviceType String? @db.VarChar(50)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tagId])
+  @@index([storeId])
+  @@index([contactId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ConversionEvent {
+  id Int @id @default(autoincrement())
+
+  // STORE SCOPE
+  storeId Int
+  store   User @relation("ConversionEventStore", fields: [storeId], references: [id], onDelete: Cascade)
+
+  // Contact who visited
+  contactId Int
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  // Optional campaign/message association
+  campaignId        Int?
+  campaign          Campaign?        @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  campaignMessageId Int?
+  campaignMessage   CampaignMessage? @relation(fields: [campaignMessageId], references: [id], onDelete: SetNull)
+
+  // NFC tag used for conversion
+  nfcTagId Int
+  nfcTag   NfcTag @relation(fields: [nfcTagId], references: [id], onDelete: Cascade)
+
+  // Timestamp when conversion occurred
+  occurredAt DateTime @default(now())
+
+  // Additional metadata (location, device info, etc.)
+  metadata Json?
+
+  @@index([storeId])
+  @@index([campaignId])
+  @@index([contactId])
+  @@index([nfcTagId])
+  @@index([occurredAt])
+  @@index([storeId, campaignId])
+}
+
+model OfferViewEvent {
+  id Int @id @default(autoincrement())
+
+  // Campaign message reference (for tracking)
+  campaignMessageId Int
+  campaignMessage   CampaignMessage @relation(fields: [campaignMessageId], references: [id], onDelete: Cascade)
+
+  // Campaign and contact association
+  campaignId Int
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contactId  Int
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  // OWNER SCOPE
+  ownerId Int
+  owner   User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Technical data for analytics
+  ipAddress  String? @db.VarChar(45) // IPv4 or IPv6
+  userAgent  String? @db.VarChar(500)
+  deviceType String? @db.VarChar(50)
+
+  // Timestamp when offer was viewed
+  viewedAt DateTime @default(now())
+
+  @@index([campaignMessageId])
+  @@index([campaignId])
+  @@index([contactId])
+  @@index([ownerId])
+  @@index([viewedAt])
+  @@index([ownerId, campaignId])
+}
+
+model FormConfig {
+  id Int @id @default(autoincrement())
+
+  // STORE SCOPE
+  storeId Int
+  store   User @relation("FormConfigStore", fields: [storeId], references: [id], onDelete: Cascade)
+
+  // Form configuration (JSON: fields, validation rules, etc.)
+  fields Json
+
+  // Consent text
+  consentText String @db.Text
+
+  // Language (ISO 639-1 code, e.g., "en", "el")
+  language String @default("en") @db.VarChar(10)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  nfcTags NfcTag[]
+
+  @@index([storeId])
+}
+
+enum AutomationType {
+  welcome_message
+  birthday_message
+}
+
+model Automation {
+  id Int @id @default(autoincrement())
+
+  // OWNER SCOPE
+  ownerId Int
+  owner   User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // System-defined automation type
+  type AutomationType @default(welcome_message) // welcome_message or birthday_message
+
+  // User-configurable settings
+  isActive    Boolean @default(false) // Active/Inactive toggle
+  messageBody String  @default("Hello!") @db.Text // SMS text with {{first_name}} and {{last_name}} placeholders
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages AutomationMessage[]
+
+  // Ensure one automation of each type per store
+  @@unique([ownerId, type])
+  @@index([ownerId])
+  @@index([ownerId, isActive]) // For filtering active automations
+  @@index([type]) // For system-wide queries
+}
+
+model AutomationMessage {
+  id Int @id @default(autoincrement())
+
+  // OWNER SCOPE
+  ownerId Int
+  owner   User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  automationId Int
+  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  contactId Int
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  to   String
+  text String @default("") @db.Text
+
+  trackingId String @unique // unique QR/link id per message
+
+  status MessageStatus @default(queued)
+
+  providerMessageId String?
+  error             String?
+  createdAt         DateTime  @default(now())
+  sentAt            DateTime?
+  failedAt          DateTime?
+
+  redemption AutomationRedemption?
+
+  @@index([automationId])
+  @@index([contactId])
+  @@index([status])
+  @@index([providerMessageId])
+  @@index([ownerId])
+  @@index([sentAt])
+  @@index([failedAt])
+  @@index([ownerId, automationId]) // Composite for common query pattern
+  @@index([ownerId, status]) // Composite for filtered status queries
+}
+
+model AutomationRedemption {
+  messageId Int             @id
+  message   AutomationMessage @relation(fields: [messageId], references: [id])
+
+  automationId Int
+  contactId  Int
+
+  // OWNER SCOPE
+  ownerId Int
+  owner   User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  redeemedAt       DateTime @default(now())
+  redeemedByUserId Int?
+  evidenceJson     Json?
+
+  @@index([automationId])
+  @@index([contactId])
+  @@index([ownerId])
+  @@index([ownerId, automationId]) // Composite for stats queries
+}
