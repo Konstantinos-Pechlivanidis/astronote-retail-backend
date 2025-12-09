@@ -212,14 +212,16 @@ r.post('/billing/purchase', requireAuth, async (req, res, next) => {
     });
 
     // Helper to ensure /retail path is included
-    function ensureRetailPath(url) {
-      if (!url || url.includes('localhost')) return url; // Don't modify localhost URLs
+    const ensureRetailPath = (url) => {
+      if (!url || url.includes('localhost')) {
+        return url; // Don't modify localhost URLs
+      }
       const trimmed = url.trim().replace(/\/$/, '');
       if (!trimmed.endsWith('/retail')) {
         return `${trimmed}/retail`;
       }
       return trimmed;
-    }
+    };
     
     const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:8080';
     const frontendUrl = ensureRetailPath(baseUrl);
@@ -307,14 +309,16 @@ r.post('/subscriptions/subscribe', requireAuth, async (req, res, next) => {
     }
 
     // Helper to ensure /retail path is included
-    function ensureRetailPath(url) {
-      if (!url || url.includes('localhost')) return url; // Don't modify localhost URLs
+    const ensureRetailPath = (url) => {
+      if (!url || url.includes('localhost')) {
+        return url; // Don't modify localhost URLs
+      }
       const trimmed = url.trim().replace(/\/$/, '');
       if (!trimmed.endsWith('/retail')) {
         return `${trimmed}/retail`;
       }
       return trimmed;
-    }
+    };
     
     const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:8080';
     const frontendUrl = ensureRetailPath(baseUrl);
@@ -548,7 +552,9 @@ r.get('/subscriptions/portal', requireAuth, async (req, res, next) => {
       customerId: subscription.stripeCustomerId,
       returnUrl: (() => {
         const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:8080';
-        if (baseUrl.includes('localhost')) return `${baseUrl}/credits`;
+        if (baseUrl.includes('localhost')) {
+          return `${baseUrl}/credits`;
+        }
         const trimmed = baseUrl.trim().replace(/\/$/, '');
         const url = trimmed.endsWith('/retail') ? trimmed : `${trimmed}/retail`;
         return `${url}/credits`;
@@ -600,14 +606,16 @@ r.post('/billing/topup', requireAuth, async (req, res, next) => {
     const price = calculateTopupPrice(credits);
 
     // Helper to ensure /retail path is included
-    function ensureRetailPath(url) {
-      if (!url || url.includes('localhost')) return url; // Don't modify localhost URLs
+    const ensureRetailPath = (url) => {
+      if (!url || url.includes('localhost')) {
+        return url; // Don't modify localhost URLs
+      }
       const trimmed = url.trim().replace(/\/$/, '');
       if (!trimmed.endsWith('/retail')) {
         return `${trimmed}/retail`;
       }
       return trimmed;
-    }
+    };
     
     const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:8080';
     const frontendUrl = ensureRetailPath(baseUrl);

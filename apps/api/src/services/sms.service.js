@@ -11,7 +11,9 @@ const logger = pino({ name: 'sms-service' });
 
 // Helper function to ensure base URL includes /retail path
 function ensureRetailPath(url) {
-  if (!url) return url;
+  if (!url) {
+    return url;
+  }
   const trimmed = url.trim().replace(/\/$/, ''); // Remove trailing slash
   // If URL doesn't end with /retail, add it
   if (!trimmed.endsWith('/retail')) {

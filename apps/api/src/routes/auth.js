@@ -14,7 +14,6 @@ router.use(cookieParser());
 const REFRESH_COOKIE = 'rt';
 
 // Cookie options (secure in production, cross-site support)
-const isProd = process.env.NODE_ENV === 'production';
 function setRefreshCookie(res, token, expiresAt) {
   // For cross-site cookies (different domains), we need SameSite=None and Secure=true
   // Frontend: astronote-retail-frontend.onrender.com
