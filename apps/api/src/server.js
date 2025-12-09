@@ -102,9 +102,6 @@ const corsOptions = allowlist.length
 
 app.use(cors(corsOptions));
 
-// Explicit OPTIONS handler for preflight requests (ensure CORS works)
-app.options('*', cors(corsOptions));
-
 // ---- Body parsers ----
 // Keep a raw copy for HMAC verification on webhooks
 app.use(
