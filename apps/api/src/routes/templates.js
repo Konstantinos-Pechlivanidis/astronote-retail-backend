@@ -35,7 +35,7 @@ router.get('/templates', requireAuth, async (req, res, next) => {
     const where = { ownerId: SYSTEM_USER_ID, language };
     
     if (q) {where.name = { contains: q, mode: 'insensitive' };}
-    if (category && ['cafe', 'restaurant', 'gym', 'sports_club', 'generic'].includes(category)) {
+    if (category && ['cafe', 'restaurant', 'gym', 'sports_club', 'generic', 'hotels'].includes(category)) {
       where.category = category;
     }
 
@@ -53,6 +53,11 @@ router.get('/templates', requireAuth, async (req, res, next) => {
           goal: true,
           suggestedMetrics: true,
           language: true,
+          conversionRate: true,
+          productViewsIncrease: true,
+          clickThroughRate: true,
+          averageOrderValue: true,
+          customerRetention: true,
           createdAt: true, 
           updatedAt: true 
         }
@@ -89,6 +94,11 @@ router.get('/templates/:id', requireAuth, async (req, res, next) => {
         goal: true,
         suggestedMetrics: true,
         language: true,
+        conversionRate: true,
+        productViewsIncrease: true,
+        clickThroughRate: true,
+        averageOrderValue: true,
+        customerRetention: true,
         createdAt: true, 
         updatedAt: true 
       }

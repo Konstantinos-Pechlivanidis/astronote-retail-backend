@@ -175,6 +175,7 @@ enum TemplateCategory {
   gym
   sports_club
   generic
+  hotels
 }
 
 model MessageTemplate {
@@ -192,6 +193,12 @@ model MessageTemplate {
   goal             String?          @db.VarChar(200) // Use case description
   suggestedMetrics String?          @db.VarChar(500) // Suggested KPIs to watch
   language         String           @default("en") // "en" or "gr" for i18n support
+  // Statistics fields
+  conversionRate      Float?      // Conversion rate percentage (e.g., 33.5 for 33.5%)
+  productViewsIncrease Float?     // Product views increase percentage (e.g., 55.0 for 55%)
+  clickThroughRate    Float?      // Click-through rate percentage
+  averageOrderValue    Float?      // Average order value increase percentage
+  customerRetention    Float?      // Customer retention improvement percentage
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
