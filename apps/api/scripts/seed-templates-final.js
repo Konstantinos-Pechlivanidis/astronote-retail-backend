@@ -848,9 +848,16 @@ async function seedTemplates() {
       console.log(`⚠️  Found ${campaignsUsingTemplates.length} campaigns using templates.`);
       console.log('   Creating a temporary template to update campaigns...');
       
-      // Create a temporary template to use as placeholder
-      const tempTemplate = await prisma.messageTemplate.create({
-        data: {
+      // Create or get a temporary template to use as placeholder
+      const tempTemplate = await prisma.messageTemplate.upsert({
+        where: {
+          ownerId_name: {
+            ownerId: SYSTEM_USER_ID,
+            name: 'TEMP_PLACEHOLDER (EN)'
+          }
+        },
+        update: {},
+        create: {
           ownerId: SYSTEM_USER_ID,
           name: 'TEMP_PLACEHOLDER (EN)',
           text: 'Temporary placeholder template',
@@ -878,13 +885,17 @@ async function seedTemplates() {
 
       console.log(`   ✅ Updated ${campaignsUsingTemplates.length} campaigns to use temporary template.`);
       
-      // Now delete all templates (including the temp one will be recreated)
+      // Delete all templates EXCEPT the temporary one
       const deleteResult = await prisma.messageTemplate.deleteMany({
-        where: { ownerId: SYSTEM_USER_ID }
+        where: { 
+          ownerId: SYSTEM_USER_ID,
+          id: { not: tempTemplate.id }
+        }
       });
-      console.log(`🗑️  Deleted ${deleteResult.count} existing templates.`);
+      console.log(`🗑️  Deleted ${deleteResult.count} existing templates (kept temporary template).`);
       
-      console.log(`⚠️  Note: ${campaignsUsingTemplates.length} campaigns now need to be updated to use new templates with metrics.`);
+      // Store temp template ID to replace it later
+      const tempTemplateId = tempTemplate.id;
     } else {
       // No campaigns using templates, safe to delete all
       const deleteResult = await prisma.messageTemplate.deleteMany({
@@ -895,46 +906,140 @@ async function seedTemplates() {
 
     let createdEn = 0;
     let createdGr = 0;
+    let tempTemplateId = null;
 
+    // Check if we have a temporary template to replace
+    const tempTemplate = await prisma.messageTemplate.findFirst({
+      where: {
+        ownerId: SYSTEM_USER_ID,
+        name: 'TEMP_PLACEHOLDER (EN)'
+      }
+    });
+    
+    if (tempTemplate) {
+      tempTemplateId = tempTemplate.id;
+      console.log(`   Will replace temporary template (ID: ${tempTemplateId}) with first new template.`);
+    }
+
+    let isFirstEnTemplate = true;
     for (const templateDef of templateDefinitions) {
       const { name, category, conversionRate, productViewsIncrease, clickThroughRate, averageOrderValue, customerRetention, en, gr } = templateDef;
 
-      // Create English version
-      await prisma.messageTemplate.create({
-        data: {
-          ownerId: SYSTEM_USER_ID,
-          name: `${name} (EN)`,
-          text: en.text,
-          category: category,
-          goal: en.goal,
-          suggestedMetrics: en.suggestedMetrics,
-          language: 'en',
-          conversionRate: conversionRate,
-          productViewsIncrease: productViewsIncrease,
-          clickThroughRate: clickThroughRate,
-          averageOrderValue: averageOrderValue,
-          customerRetention: customerRetention,
-        }
-      });
-      createdEn++;
+      // Create or replace English version
+      if (isFirstEnTemplate && tempTemplateId) {
+        // Replace the temporary template with the first new template
+        await prisma.messageTemplate.update({
+          where: { id: tempTemplateId },
+          data: {
+            name: `${name} (EN)`,
+            text: en.text,
+            category: category,
+            goal: en.goal,
+            suggestedMetrics: en.suggestedMetrics,
+            language: 'en',
+            conversionRate: conversionRate,
+            productViewsIncrease: productViewsIncrease,
+            clickThroughRate: clickThroughRate,
+            averageOrderValue: averageOrderValue,
+            customerRetention: customerRetention,
+          }
+        });
+        isFirstEnTemplate = false;
+        createdEn++;
+      } else {
+        // Check if template already exists (in case of partial run)
+        const existing = await prisma.messageTemplate.findUnique({
+          where: {
+            ownerId_name: {
+              ownerId: SYSTEM_USER_ID,
+              name: `${name} (EN)`
+            }
+          }
+        });
 
-      // Create Greek version
-      await prisma.messageTemplate.create({
-        data: {
-          ownerId: SYSTEM_USER_ID,
-          name: `${name} (GR)`,
-          text: gr.text,
-          category: category,
-          goal: gr.goal,
-          suggestedMetrics: gr.suggestedMetrics,
-          language: 'gr',
-          conversionRate: conversionRate,
-          productViewsIncrease: productViewsIncrease,
-          clickThroughRate: clickThroughRate,
-          averageOrderValue: averageOrderValue,
-          customerRetention: customerRetention,
+        if (existing) {
+          // Update existing
+          await prisma.messageTemplate.update({
+            where: { id: existing.id },
+            data: {
+              text: en.text,
+              category: category,
+              goal: en.goal,
+              suggestedMetrics: en.suggestedMetrics,
+              language: 'en',
+              conversionRate: conversionRate,
+              productViewsIncrease: productViewsIncrease,
+              clickThroughRate: clickThroughRate,
+              averageOrderValue: averageOrderValue,
+              customerRetention: customerRetention,
+            }
+          });
+        } else {
+          // Create new
+          await prisma.messageTemplate.create({
+            data: {
+              ownerId: SYSTEM_USER_ID,
+              name: `${name} (EN)`,
+              text: en.text,
+              category: category,
+              goal: en.goal,
+              suggestedMetrics: en.suggestedMetrics,
+              language: 'en',
+              conversionRate: conversionRate,
+              productViewsIncrease: productViewsIncrease,
+              clickThroughRate: clickThroughRate,
+              averageOrderValue: averageOrderValue,
+              customerRetention: customerRetention,
+            }
+          });
+        }
+        createdEn++;
+      }
+
+      // Create or update Greek version
+      const existingGr = await prisma.messageTemplate.findUnique({
+        where: {
+          ownerId_name: {
+            ownerId: SYSTEM_USER_ID,
+            name: `${name} (GR)`
+          }
         }
       });
+
+      if (existingGr) {
+        await prisma.messageTemplate.update({
+          where: { id: existingGr.id },
+          data: {
+            text: gr.text,
+            category: category,
+            goal: gr.goal,
+            suggestedMetrics: gr.suggestedMetrics,
+            language: 'gr',
+            conversionRate: conversionRate,
+            productViewsIncrease: productViewsIncrease,
+            clickThroughRate: clickThroughRate,
+            averageOrderValue: averageOrderValue,
+            customerRetention: customerRetention,
+          }
+        });
+      } else {
+        await prisma.messageTemplate.create({
+          data: {
+            ownerId: SYSTEM_USER_ID,
+            name: `${name} (GR)`,
+            text: gr.text,
+            category: category,
+            goal: gr.goal,
+            suggestedMetrics: gr.suggestedMetrics,
+            language: 'gr',
+            conversionRate: conversionRate,
+            productViewsIncrease: productViewsIncrease,
+            clickThroughRate: clickThroughRate,
+            averageOrderValue: averageOrderValue,
+            customerRetention: customerRetention,
+          }
+        });
+      }
       createdGr++;
     }
 
