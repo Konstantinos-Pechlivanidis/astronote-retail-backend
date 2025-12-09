@@ -105,15 +105,17 @@ const corsOptions = allowlist.length
       optionsSuccessStatus: 204,
     };
 
-// Apply CORS middleware
+// Apply CORS middleware - must be before routes
+// Enable preflight for all routes
 app.use(cors(corsOptions));
 
-// Explicit OPTIONS handler for all routes to ensure preflight requests work
+// Additional CORS handling for preflight requests
 app.use((req, res, next) => {
+  // Handle preflight OPTIONS requests
   if (req.method === 'OPTIONS') {
     const origin = req.headers.origin;
     if (isOriginAllowed(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin || '*');
+      res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Request-ID, Cookie');
