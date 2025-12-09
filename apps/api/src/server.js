@@ -109,11 +109,12 @@ const corsOptions = allowlist.length
 // Enable preflight for all routes
 app.use(cors(corsOptions));
 
-// Additional CORS handling for preflight requests
+// Additional CORS handling for all requests (including preflight)
 app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
   // Handle preflight OPTIONS requests
   if (req.method === 'OPTIONS') {
-    const origin = req.headers.origin;
     if (isOriginAllowed(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -123,6 +124,13 @@ app.use((req, res, next) => {
       return res.status(204).end();
     }
   }
+  
+  // Ensure CORS headers are set on all responses (not just preflight)
+  if (origin && isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  
   next();
 });
 
