@@ -49,58 +49,80 @@ if (!allowlist.includes(defaultRetailFrontend) && !allowlist.some(a => defaultRe
   allowlist.push(defaultRetailFrontend);
 }
 
+// Helper function to check if origin is allowed
+function isOriginAllowed(origin) {
+  if (!origin) {
+    return true; // Allow requests with no origin (e.g., Postman, server-to-server)
+  }
+  
+  return allowlist.some((allowed) => {
+    // Exact match
+    if (origin === allowed) {
+      return true;
+    }
+    // Starts with match (for subpaths)
+    if (origin.startsWith(allowed)) {
+      return true;
+    }
+    // Handle protocol variations
+    const originWithoutProtocol = origin.replace(/^https?:\/\//, '');
+    const allowedWithoutProtocol = allowed.replace(/^https?:\/\//, '');
+    if (originWithoutProtocol === allowedWithoutProtocol || originWithoutProtocol.startsWith(allowedWithoutProtocol)) {
+      return true;
+    }
+    return false;
+  });
+}
+
 // Allow Postman / server-to-server (no Origin)
 const corsOptions = allowlist.length
   ? {
       origin(origin, cb) {
-        // Allow requests with no origin (e.g., Postman, server-to-server)
-        if (!origin) {
-          return cb(null, true);
-        }
+        const ok = isOriginAllowed(origin);
         
-        // Check if origin matches any allowlist entry (exact match or starts with)
-        const ok = allowlist.some((allowed) => {
-          // Exact match
-          if (origin === allowed) {
-            return true;
-          }
-          // Starts with match (for subpaths)
-          if (origin.startsWith(allowed)) {
-            return true;
-          }
-          // Handle protocol variations
-          const originWithoutProtocol = origin.replace(/^https?:\/\//, '');
-          const allowedWithoutProtocol = allowed.replace(/^https?:\/\//, '');
-          if (originWithoutProtocol === allowedWithoutProtocol || originWithoutProtocol.startsWith(allowedWithoutProtocol)) {
-            return true;
-          }
-          return false;
-        });
-        
-        if (!ok) {
-          // Log for debugging (only in development)
-          if (process.env.NODE_ENV !== 'production') {
-            console.warn(`[CORS] Blocked origin: ${origin}. Allowed: ${allowlist.join(', ')}`);
-          }
+        if (!ok && origin) {
+          // Log for debugging
+          console.warn(`[CORS] Blocked origin: ${origin}. Allowed: ${allowlist.join(', ')}`);
         }
         
         return cb(ok ? null : new Error('Not allowed by CORS'));
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID', 'Cookie'],
       exposedHeaders: ['X-Request-ID'],
       maxAge: 86400, // 24 hours
+      preflightContinue: false,
+      optionsSuccessStatus: 204,
     }
   : { 
       origin: true, 
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID', 'Cookie'],
       exposedHeaders: ['X-Request-ID'],
+      preflightContinue: false,
+      optionsSuccessStatus: 204,
     };
 
+// Apply CORS middleware
 app.use(cors(corsOptions));
+
+// Explicit OPTIONS handler for all routes to ensure preflight requests work
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin;
+    if (isOriginAllowed(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin || '*');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Request-ID, Cookie');
+      res.setHeader('Access-Control-Max-Age', '86400');
+      return res.status(204).end();
+    }
+  }
+  next();
+});
 
 // ---- Body parsers ----
 // Keep a raw copy for HMAC verification on webhooks
@@ -284,19 +306,9 @@ app.use((req, res, next) => {
 app.use((err, req, res, _next) => {
   // Ensure CORS headers are set even on error responses
   const origin = req.headers.origin;
-  if (origin && allowlist.length) {
-    const isAllowed = allowlist.some((allowed) => {
-      if (origin === allowed || origin.startsWith(allowed)) {
-        return true;
-      }
-      const originWithoutProtocol = origin.replace(/^https?:\/\//, '');
-      const allowedWithoutProtocol = allowed.replace(/^https?:\/\//, '');
-      return originWithoutProtocol === allowedWithoutProtocol || originWithoutProtocol.startsWith(allowedWithoutProtocol);
-    });
-    if (isAllowed) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
+  if (origin && isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
   
   const { handleError } = require('./lib/errors');
