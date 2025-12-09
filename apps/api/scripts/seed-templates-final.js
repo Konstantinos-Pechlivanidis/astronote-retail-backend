@@ -837,25 +837,56 @@ async function seedTemplates() {
       process.exit(1);
     }
 
-    // Find templates that are in use by campaigns (to avoid deleting them)
+    // Find campaigns using templates (get all campaigns and filter)
     const allCampaigns = await prisma.campaign.findMany({
-      select: { templateId: true }
+      select: { id: true, templateId: true }
     });
     
-    const templateIdsInUse = [...new Set(allCampaigns.map(c => c.templateId).filter(id => id !== null))];
-    
-    // Delete only templates that are not in use
-    if (templateIdsInUse.length > 0) {
-      const deleteResult = await prisma.messageTemplate.deleteMany({
-        where: { 
+    const campaignsUsingTemplates = allCampaigns.filter(c => c.templateId !== null);
+
+    if (campaignsUsingTemplates.length > 0) {
+      console.log(`⚠️  Found ${campaignsUsingTemplates.length} campaigns using templates.`);
+      console.log('   Creating a temporary template to update campaigns...');
+      
+      // Create a temporary template to use as placeholder
+      const tempTemplate = await prisma.messageTemplate.create({
+        data: {
           ownerId: SYSTEM_USER_ID,
-          id: { notIn: templateIdsInUse }
+          name: 'TEMP_PLACEHOLDER (EN)',
+          text: 'Temporary placeholder template',
+          category: 'generic',
+          goal: 'Temporary placeholder',
+          language: 'en',
+          conversionRate: 0,
+          productViewsIncrease: 0,
+          clickThroughRate: 0,
+          averageOrderValue: 0,
+          customerRetention: 0,
         }
       });
-      console.log(`🗑️  Deleted ${deleteResult.count} unused templates.`);
-      console.log(`ℹ️  ${templateIdsInUse.length} templates are in use by campaigns and will be updated.`);
+
+      // Update all campaigns to use the temporary template
+      const uniqueTemplateIds = [...new Set(campaignsUsingTemplates.map(c => c.templateId).filter(Boolean))];
+      await prisma.campaign.updateMany({
+        where: {
+          templateId: { in: uniqueTemplateIds }
+        },
+        data: {
+          templateId: tempTemplate.id
+        }
+      });
+
+      console.log(`   ✅ Updated ${campaignsUsingTemplates.length} campaigns to use temporary template.`);
+      
+      // Now delete all templates (including the temp one will be recreated)
+      const deleteResult = await prisma.messageTemplate.deleteMany({
+        where: { ownerId: SYSTEM_USER_ID }
+      });
+      console.log(`🗑️  Deleted ${deleteResult.count} existing templates.`);
+      
+      console.log(`⚠️  Note: ${campaignsUsingTemplates.length} campaigns now need to be updated to use new templates with metrics.`);
     } else {
-      // No templates in use, safe to delete all
+      // No campaigns using templates, safe to delete all
       const deleteResult = await prisma.messageTemplate.deleteMany({
         where: { ownerId: SYSTEM_USER_ID }
       });
@@ -863,34 +894,14 @@ async function seedTemplates() {
     }
 
     let createdEn = 0;
-    let updatedEn = 0;
     let createdGr = 0;
-    let updatedGr = 0;
 
     for (const templateDef of templateDefinitions) {
       const { name, category, conversionRate, productViewsIncrease, clickThroughRate, averageOrderValue, customerRetention, en, gr } = templateDef;
 
-      // Upsert English version
-      const resultEn = await prisma.messageTemplate.upsert({
-        where: {
-          ownerId_name: {
-            ownerId: SYSTEM_USER_ID,
-            name: `${name} (EN)`
-          }
-        },
-        update: {
-          text: en.text,
-          category: category,
-          goal: en.goal,
-          suggestedMetrics: en.suggestedMetrics,
-          language: 'en',
-          conversionRate: conversionRate,
-          productViewsIncrease: productViewsIncrease,
-          clickThroughRate: clickThroughRate,
-          averageOrderValue: averageOrderValue,
-          customerRetention: customerRetention,
-        },
-        create: {
+      // Create English version
+      await prisma.messageTemplate.create({
+        data: {
           ownerId: SYSTEM_USER_ID,
           name: `${name} (EN)`,
           text: en.text,
@@ -905,34 +916,11 @@ async function seedTemplates() {
           customerRetention: customerRetention,
         }
       });
+      createdEn++;
 
-      if (resultEn.createdAt.getTime() === resultEn.updatedAt.getTime()) {
-        createdEn++;
-      } else {
-        updatedEn++;
-      }
-
-      // Upsert Greek version
-      const resultGr = await prisma.messageTemplate.upsert({
-        where: {
-          ownerId_name: {
-            ownerId: SYSTEM_USER_ID,
-            name: `${name} (GR)`
-          }
-        },
-        update: {
-          text: gr.text,
-          category: category,
-          goal: gr.goal,
-          suggestedMetrics: gr.suggestedMetrics,
-          language: 'gr',
-          conversionRate: conversionRate,
-          productViewsIncrease: productViewsIncrease,
-          clickThroughRate: clickThroughRate,
-          averageOrderValue: averageOrderValue,
-          customerRetention: customerRetention,
-        },
-        create: {
+      // Create Greek version
+      await prisma.messageTemplate.create({
+        data: {
           ownerId: SYSTEM_USER_ID,
           name: `${name} (GR)`,
           text: gr.text,
@@ -947,18 +935,13 @@ async function seedTemplates() {
           customerRetention: customerRetention,
         }
       });
-
-      if (resultGr.createdAt.getTime() === resultGr.updatedAt.getTime()) {
-        createdGr++;
-      } else {
-        updatedGr++;
-      }
+      createdGr++;
     }
 
     const totalTemplates = templateDefinitions.length * 2; // English + Greek
     console.log(`✅ Seeded ${totalTemplates} templates:`);
-    console.log(`   English: Created ${createdEn}, Updated ${updatedEn}`);
-    console.log(`   Greek: Created ${createdGr}, Updated ${updatedGr}`);
+    console.log(`   English: ${createdEn} templates`);
+    console.log(`   Greek: ${createdGr} templates`);
     console.log(`\nCategories: cafe, restaurant, gym, sports_club, generic, hotels`);
     console.log('Templates are now available to all users via GET /api/templates');
     console.log('All templates support ONLY: {{first_name}}, {{last_name}}');
