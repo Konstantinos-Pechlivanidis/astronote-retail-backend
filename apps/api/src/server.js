@@ -43,19 +43,67 @@ const allowlist = (process.env.CORS_ALLOWLIST || '')
   .map((s) => s.trim())
   .filter(Boolean);
 
+// Add default retail frontend URL if not in allowlist
+const defaultRetailFrontend = 'https://astronote-retail-frontend.onrender.com';
+if (!allowlist.includes(defaultRetailFrontend) && !allowlist.some(a => defaultRetailFrontend.startsWith(a))) {
+  allowlist.push(defaultRetailFrontend);
+}
+
 // Allow Postman / server-to-server (no Origin)
 const corsOptions = allowlist.length
   ? {
       origin(origin, cb) {
-        if (!origin) {return cb(null, true);}
-        const ok = allowlist.some((a) => origin.startsWith(a));
+        // Allow requests with no origin (e.g., Postman, server-to-server)
+        if (!origin) {
+          return cb(null, true);
+        }
+        
+        // Check if origin matches any allowlist entry (exact match or starts with)
+        const ok = allowlist.some((allowed) => {
+          // Exact match
+          if (origin === allowed) {
+            return true;
+          }
+          // Starts with match (for subpaths)
+          if (origin.startsWith(allowed)) {
+            return true;
+          }
+          // Handle protocol variations
+          const originWithoutProtocol = origin.replace(/^https?:\/\//, '');
+          const allowedWithoutProtocol = allowed.replace(/^https?:\/\//, '');
+          if (originWithoutProtocol === allowedWithoutProtocol || originWithoutProtocol.startsWith(allowedWithoutProtocol)) {
+            return true;
+          }
+          return false;
+        });
+        
+        if (!ok) {
+          // Log for debugging (only in development)
+          if (process.env.NODE_ENV !== 'production') {
+            console.warn(`[CORS] Blocked origin: ${origin}. Allowed: ${allowlist.join(', ')}`);
+          }
+        }
+        
         return cb(ok ? null : new Error('Not allowed by CORS'));
       },
       credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID'],
+      exposedHeaders: ['X-Request-ID'],
+      maxAge: 86400, // 24 hours
     }
-  : { origin: true, credentials: true };
+  : { 
+      origin: true, 
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID'],
+      exposedHeaders: ['X-Request-ID'],
+    };
 
 app.use(cors(corsOptions));
+
+// Explicit OPTIONS handler for preflight requests (ensure CORS works)
+app.options('*', cors(corsOptions));
 
 // ---- Body parsers ----
 // Keep a raw copy for HMAC verification on webhooks
@@ -237,6 +285,23 @@ app.use((req, res, next) => {
 // Centralized error handler
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, _next) => {
+  // Ensure CORS headers are set even on error responses
+  const origin = req.headers.origin;
+  if (origin && allowlist.length) {
+    const isAllowed = allowlist.some((allowed) => {
+      if (origin === allowed || origin.startsWith(allowed)) {
+        return true;
+      }
+      const originWithoutProtocol = origin.replace(/^https?:\/\//, '');
+      const allowedWithoutProtocol = allowed.replace(/^https?:\/\//, '');
+      return originWithoutProtocol === allowedWithoutProtocol || originWithoutProtocol.startsWith(allowedWithoutProtocol);
+    });
+    if (isAllowed) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+  }
+  
   const { handleError } = require('./lib/errors');
   handleError(err, req, res);
 });
