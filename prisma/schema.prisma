@@ -246,8 +246,9 @@ model Campaign {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   total       Int            @default(0)
-  sent        Int            @default(0)
+  sent        Int            @default(0) // Actually sent (status='sent') - Phase 2.2
   failed      Int            @default(0)
+  processed   Int?           // Processed = sent + failed (Phase 2.2, optional, can be calculated)
 
   createdById Int
   createdBy   User @relation(name: "CampaignCreator", fields: [createdById], references: [id], onDelete: Restrict)
@@ -293,7 +294,9 @@ model CampaignMessage {
   status MessageStatus @default(queued)
 
   providerMessageId String?
+  bulkId            String?  // Mitto bulkId for batch tracking
   error             String?
+  retryCount        Int      @default(0)  // Track retry attempts for idempotency
   createdAt         DateTime  @default(now())
   sentAt            DateTime?
   failedAt          DateTime?
@@ -306,6 +309,7 @@ model CampaignMessage {
   @@index([contactId])
   @@index([status])
   @@index([providerMessageId])
+  @@index([bulkId])
   @@index([ownerId])
   @@index([sentAt])
   @@index([failedAt])

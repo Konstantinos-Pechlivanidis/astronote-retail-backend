@@ -260,29 +260,58 @@ exports.enqueueCampaign = async (campaignId) => {
   });
 
   let enqueuedJobs = 0;
-  if (smsQueue) {
-    // Batch enqueue jobs (non-blocking, fire and forget if Redis is slow)
-    const enqueuePromises = toEnqueue.map(m => 
-      smsQueue.add('sendSMS', { messageId: m.id }, { jobId: `message:${m.id}` })
-        .then(() => { enqueuedJobs++; })
+  if (smsQueue && toEnqueue.length > 0) {
+    // Campaigns always use bulk SMS with fixed batch size
+    // Mitto's bulk API can handle 1M+ messages, so we use a simple fixed batch size
+    // This protects our infrastructure while keeping logic simple and predictable
+    const BATCH_SIZE = Number(process.env.SMS_BATCH_SIZE || 5000);
+    
+    // Group messages into fixed-size batches
+    const batches = [];
+    for (let i = 0; i < toEnqueue.length; i += BATCH_SIZE) {
+      batches.push(toEnqueue.slice(i, i + BATCH_SIZE).map(m => m.id));
+    }
+
+    logger.info({ 
+      campaignId: camp.id, 
+      ownerId: camp.ownerId,
+      totalMessages: toEnqueue.length,
+      batchCount: batches.length,
+      batchSize: BATCH_SIZE
+    }, 'Enqueuing bulk SMS batch jobs');
+
+    // Enqueue batch jobs
+    const enqueuePromises = batches.map((messageIds, batchIndex) => 
+      smsQueue.add('sendBulkSMS', {
+        campaignId: camp.id,
+        ownerId: camp.ownerId,
+        messageIds
+      }, { 
+        jobId: `batch:${camp.id}:${Date.now()}:${batchIndex}`,
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 3000 }
+      })
+        .then(() => { 
+          enqueuedJobs += messageIds.length; 
+          logger.debug({ campaignId: camp.id, batchIndex, messageCount: messageIds.length }, 'Batch job enqueued');
+        })
         .catch(err => {
-          logger.error({ messageId: m.id, err: err.message }, 'Failed to enqueue message job');
-          // Continue even if some jobs fail to enqueue
+          logger.error({ campaignId: camp.id, batchIndex, err: err.message }, 'Failed to enqueue batch job');
+          // Continue even if some batches fail to enqueue
         })
     );
     
-    // Wait for initial batch (first 100) to ensure some jobs are enqueued
-    // But don't block on Redis failures - continue even if some fail
+    // Wait for initial batches (first 10) to ensure some jobs are enqueued
     try {
-      await Promise.all(enqueuePromises.slice(0, Math.min(100, enqueuePromises.length)));
+      await Promise.all(enqueuePromises.slice(0, Math.min(10, enqueuePromises.length)));
     } catch (err) {
-      logger.error({ campaignId: camp.id, err: err.message }, 'Some jobs failed to enqueue initially');
+      logger.error({ campaignId: camp.id, err: err.message }, 'Some batch jobs failed to enqueue initially');
     }
     
-    // Continue enqueuing remaining jobs in background (fire and forget)
-    if (enqueuePromises.length > 100) {
-      Promise.all(enqueuePromises.slice(100)).catch(err => {
-        logger.error({ campaignId: camp.id, err: err.message }, 'Some background jobs failed to enqueue');
+    // Continue enqueuing remaining batches in background (fire and forget)
+    if (enqueuePromises.length > 10) {
+      Promise.all(enqueuePromises.slice(10)).catch(err => {
+        logger.error({ campaignId: camp.id, err: err.message }, 'Some background batch jobs failed to enqueue');
       });
     }
   } else {

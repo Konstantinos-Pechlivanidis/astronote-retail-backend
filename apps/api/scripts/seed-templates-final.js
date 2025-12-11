@@ -894,8 +894,8 @@ async function seedTemplates() {
       });
       console.log(`🗑️  Deleted ${deleteResult.count} existing templates (kept temporary template).`);
       
-      // Store temp template ID to replace it later
-      const tempTemplateId = tempTemplate.id;
+      // Store temp template ID to replace it later (if needed in future)
+      // const tempTemplateId = tempTemplate.id; // Currently unused
     } else {
       // No campaigns using templates, safe to delete all
       const deleteResult = await prisma.messageTemplate.deleteMany({

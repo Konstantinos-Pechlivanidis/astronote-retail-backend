@@ -5,8 +5,9 @@ const pino = require('pino');
 const logger = pino({ name: 'campaign-aggregates-service' });
 
 /**
- * Update campaign aggregates (total, sent, failed) from CampaignMessage counts
- * Note: We only track "sent" and "failed" - "delivered" is mapped to "sent"
+ * Update campaign aggregates (total, sent, failed, processed) from CampaignMessage counts
+ * Phase 2.2: sent = only actually sent (status='sent'), processed = sent + failed
+ * Note: "delivered" status is mapped to "sent" - we only track sent/failed
  * 
  * @param {number} campaignId - Campaign ID
  * @param {number} ownerId - Owner ID for scoping
@@ -25,9 +26,8 @@ async function updateCampaignAggregates(campaignId, ownerId) {
       return null;
     }
 
-    // Count messages by status
-    // sent = all processed messages (sent or failed), failed = only failed
-    const [total, sent, failed] = await Promise.all([
+    // Count messages by status (Phase 2.2: sent = only actually sent, not processed)
+    const [total, success, failed] = await Promise.all([
       prisma.campaignMessage.count({
         where: { campaignId, ownerId }
       }),
@@ -35,7 +35,7 @@ async function updateCampaignAggregates(campaignId, ownerId) {
         where: {
           campaignId,
           ownerId,
-          status: { in: ['sent', 'failed'] }
+          status: 'sent' // Only actually sent messages (Phase 2.2)
         }
       }),
       prisma.campaignMessage.count({
@@ -46,6 +46,9 @@ async function updateCampaignAggregates(campaignId, ownerId) {
         }
       })
     ]);
+
+    // Calculate processed (sent + failed) - Phase 2.2
+    const processed = success + failed;
 
     // Check if all messages are processed (no queued messages remaining)
     const queuedCount = await prisma.campaignMessage.count({
@@ -61,17 +64,18 @@ async function updateCampaignAggregates(campaignId, ownerId) {
     if (queuedCount > 0) {
       // Still has queued messages - keep as 'sending'
       campaignStatus = 'sending';
-    } else if (total > 0 && sent === total) {
-      // All messages have been processed (sent or failed)
+    } else if (total > 0 && processed === total) {
+      // All messages have been processed (sent or failed) - Phase 2.2
       campaignStatus = 'completed';
     }
     // If total === 0, don't change status (campaign might be in draft)
 
-    // Update campaign aggregates and status
+    // Update campaign aggregates and status (Phase 2.2: sent = success, add processed)
     const updateData = {
       total,
-      sent,
+      sent: success,        // Actually sent (not processed) - Phase 2.2
       failed,
+      processed,            // New: sent + failed - Phase 2.2
       updatedAt: new Date()
     };
 
@@ -91,13 +95,14 @@ async function updateCampaignAggregates(campaignId, ownerId) {
     logger.info({ 
       campaignId, 
       total, 
-      sent, 
+      sent: success,        // Actually sent - Phase 2.2
+      processed,           // New: sent + failed - Phase 2.2
       failed, 
       queuedCount,
       campaignStatus: campaignStatus || 'unchanged'
-    }, 'Campaign aggregates updated');
+    }, 'Campaign aggregates updated (Phase 2.2)');
 
-    return { total, sent, failed, campaignStatus };
+    return { total, sent: success, processed, failed, campaignStatus };
   } catch (err) {
     logger.error({ campaignId, ownerId, err: err.message }, 'Failed to update campaign aggregates');
     // Don't throw - aggregates can be recalculated later

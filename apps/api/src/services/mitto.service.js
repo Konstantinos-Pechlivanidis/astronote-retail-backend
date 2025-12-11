@@ -135,7 +135,60 @@ async function sendSingle({ userId, destination, text, sender, trafficAccountId 
 }
 
 /**
- * Send bulk SMS messages via Mitto
+ * Send bulk SMS messages via Mitto (new bulk endpoint)
+ * 
+ * @param {Array<Object>} messages - Array of message objects
+ * @param {string} messages[].trafficAccountId - Traffic account ID
+ * @param {string} messages[].destination - Recipient phone number
+ * @param {string} messages[].sms.text - Message body
+ * @param {string} messages[].sms.sender - Sender name
+ * @returns {Promise<Object>} Response with bulkId and messages array
+ */
+async function sendBulkMessages(messages) {
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    throw new Error('messages array is required and must not be empty');
+  }
+
+  // Validate all messages have required fields
+  for (const msg of messages) {
+    if (!msg.trafficAccountId || !msg.destination || !msg.sms || !msg.sms.text) {
+      throw new Error('Each message must have trafficAccountId, destination, and sms.text');
+    }
+  }
+
+  logger.info({ 
+    messageCount: messages.length 
+  }, 'Sending bulk SMS via Mitto (new endpoint)');
+
+  const response = await mittoRequest('POST', '/api/v1.1/Messages/sendmessagesbulk', {
+    messages
+  });
+
+  // Validate response format
+  if (!response.bulkId) {
+    logger.error({ response }, 'Invalid Mitto bulk response format: missing bulkId');
+    throw new Error('Invalid response from Mitto API: missing bulkId');
+  }
+
+  if (!response.messages || !Array.isArray(response.messages)) {
+    logger.error({ response }, 'Invalid Mitto bulk response format: missing messages array');
+    throw new Error('Invalid response from Mitto API: missing messages array');
+  }
+
+  logger.info({ 
+    bulkId: response.bulkId,
+    messageCount: response.messages.length 
+  }, 'Bulk SMS sent successfully via Mitto');
+
+  return {
+    bulkId: response.bulkId,
+    messages: response.messages,
+    rawResponse: response
+  };
+}
+
+/**
+ * Send bulk SMS messages via Mitto (legacy endpoint - kept for backward compatibility)
  * 
  * @param {Object} params
  * @param {number} params.userId - User ID for sender resolution
@@ -326,6 +379,7 @@ async function refreshMessageStatus(providerMessageId, ownerId = null) {
 
 module.exports = {
   sendSingle,
+  sendBulkMessages,
   sendBulkStatic,
   getMessageStatus,
   refreshMessageStatus,

@@ -1120,25 +1120,37 @@ router.get("/campaigns/:id/status", requireAuth, async (req, res, next) => {
     });
   }
 
-  // Note: "delivered" status is mapped to "sent" - we only track sent/failed
-  const [queued, sent, failed] = await Promise.all([
+  // Phase 2.2: Count messages by status (sent = only actually sent, not processed)
+  const [queued, success, failed] = await Promise.all([
     prisma.campaignMessage.count({
       where: { ownerId: req.user.id, campaignId: id, status: "queued" },
     }),
     prisma.campaignMessage.count({
-      where: { ownerId: req.user.id, campaignId: id, status: "sent" },
+      where: { ownerId: req.user.id, campaignId: id, status: "sent" }, // Only actually sent
     }),
     prisma.campaignMessage.count({
       where: { ownerId: req.user.id, campaignId: id, status: "failed" },
     }),
   ]);
 
+  // Calculate processed (sent + failed) - Phase 2.2
+  const processed = success + failed;
+
   // Map Prisma enum back to normalized format for API response
   const { mapAgeGroupToApi } = require('../lib/routeHelpers');
   const campaignResponse = { ...c, filterAgeGroup: mapAgeGroupToApi(c.filterAgeGroup) };
   
-  // Note: delivered is same as sent since delivered maps to sent
-  res.json({ campaign: campaignResponse, metrics: { queued, sent, delivered: sent, failed } });
+  // Phase 2.2: Return success (actually sent), processed (success + failed), and failed
+  // Using "success" for clarity (status='sent' messages that were successfully sent)
+  res.json({ 
+    campaign: campaignResponse, 
+    metrics: { 
+      queued, 
+      success,           // Successfully sent messages (status='sent') - Phase 2.2
+      processed,         // Processed messages (success + failed) - Phase 2.2
+      failed             // Failed messages (status='failed') - Phase 2.2
+    } 
+  });
   } catch (e) {
     next(e);
   }

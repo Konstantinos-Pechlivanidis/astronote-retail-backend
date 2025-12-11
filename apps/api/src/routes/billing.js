@@ -2,7 +2,6 @@
 const { Router } = require('express');
 const prisma = require('../lib/prisma');
 const requireAuth = require('../middleware/requireAuth');
-// const { handleError } = require('../lib/errors'); // Unused - using next() pattern
 const { getBalance } = require('../services/wallet.service');
 const {
   getSubscriptionStatus,

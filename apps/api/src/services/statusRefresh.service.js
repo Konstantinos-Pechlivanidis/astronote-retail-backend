@@ -313,8 +313,145 @@ async function refreshPendingStatuses(limit = 100) {
   }
 }
 
+/**
+ * Refresh statuses for all messages in a bulk batch (by bulkId)
+ * 
+ * @param {string} bulkId - Mitto bulkId
+ * @param {number} [ownerId] - Optional owner ID for scoping
+ * @returns {Promise<Object>} Summary of refresh operation
+ */
+async function refreshBulkStatuses(bulkId, ownerId = null) {
+  try {
+    if (!bulkId) {
+      throw new Error('bulkId is required');
+    }
+
+    // Find all messages with this bulkId
+    const where = {
+      bulkId,
+      providerMessageId: { not: null },
+      status: { in: ['queued', 'sent'] }
+    };
+    
+    if (ownerId) {
+      where.ownerId = ownerId;
+    }
+
+    const messages = await prisma.campaignMessage.findMany({
+      where,
+      select: {
+        id: true,
+        campaignId: true,
+        ownerId: true,
+        providerMessageId: true,
+        status: true
+      }
+    });
+
+    if (messages.length === 0) {
+      logger.info({ bulkId, ownerId }, 'No messages found for bulkId');
+      return { refreshed: 0, updated: 0, errors: 0, campaignsUpdated: 0 };
+    }
+
+    logger.info({ bulkId, ownerId, messageCount: messages.length }, 'Refreshing bulk statuses');
+
+    let refreshed = 0;
+    let updated = 0;
+    let errors = 0;
+    const affectedCampaigns = new Set();
+    const statusUpdates = [];
+
+    // Refresh each message status
+    for (const msg of messages) {
+      try {
+        const mittoStatus = await getMessageStatus(msg.providerMessageId);
+        const newStatus = mapMittoStatus(mittoStatus.deliveryStatus);
+
+        // Only update if status changed
+        if (newStatus !== msg.status) {
+          const updateData = {
+            status: newStatus,
+            updatedAt: new Date()
+          };
+
+          if (newStatus === 'sent') {
+            updateData.sentAt = mittoStatus.updatedAt 
+              ? new Date(mittoStatus.updatedAt) 
+              : new Date();
+          } else if (newStatus === 'failed') {
+            updateData.failedAt = mittoStatus.updatedAt 
+              ? new Date(mittoStatus.updatedAt) 
+              : new Date();
+            updateData.error = `Mitto status: ${mittoStatus.deliveryStatus}`;
+          }
+
+          statusUpdates.push({
+            id: msg.id,
+            campaignId: msg.campaignId,
+            ownerId: msg.ownerId,
+            data: updateData
+          });
+          affectedCampaigns.add(`${msg.campaignId}:${msg.ownerId}`);
+          updated++;
+        }
+
+        refreshed++;
+      } catch (err) {
+        errors++;
+        logger.error({ 
+          messageId: msg.id, 
+          providerMessageId: msg.providerMessageId,
+          bulkId,
+          err: err.message 
+        }, 'Failed to refresh message status from Mitto');
+        // Continue processing other messages
+      }
+    }
+
+    // Batch update all changed messages
+    if (statusUpdates.length > 0) {
+      await Promise.all(
+        statusUpdates.map(update =>
+          prisma.campaignMessage.update({
+            where: { id: update.id },
+            data: update.data
+          })
+        )
+      );
+    }
+
+    // Update campaign aggregates for affected campaigns
+    let campaignsUpdated = 0;
+    for (const key of affectedCampaigns) {
+      try {
+        const [campaignId, ownerId] = key.split(':').map(Number);
+        await updateCampaignAggregates(campaignId, ownerId);
+        campaignsUpdated++;
+      } catch (aggErr) {
+        logger.error({ key, err: aggErr.message }, 'Failed to update campaign aggregates');
+        // Continue with other campaigns
+      }
+    }
+
+    logger.info({ 
+      bulkId,
+      ownerId,
+      refreshed, 
+      updated, 
+      errors,
+      campaignsUpdated 
+    }, 'Bulk status refresh completed');
+
+    return { refreshed, updated, errors, campaignsUpdated };
+  } catch (err) {
+    logger.error({ bulkId, ownerId, err: err.message }, 'Failed to refresh bulk statuses');
+    throw err;
+  }
+}
+
 module.exports = {
   refreshCampaignStatuses,
-  refreshPendingStatuses
+  refreshPendingStatuses,
+  refreshBulkStatuses
 };
 
