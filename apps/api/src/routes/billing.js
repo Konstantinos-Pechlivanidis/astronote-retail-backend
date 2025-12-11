@@ -223,7 +223,7 @@ r.post('/billing/purchase', requireAuth, async (req, res, next) => {
       return trimmed;
     };
     
-    const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:8080';
+    const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'https://astronote-retail-frontend.onrender.com';
     const frontendUrl = ensureRetailPath(baseUrl);
     const successUrl = `${frontendUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${frontendUrl}/billing/cancel`;
@@ -320,7 +320,7 @@ r.post('/subscriptions/subscribe', requireAuth, async (req, res, next) => {
       return trimmed;
     };
     
-    const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:8080';
+    const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'https://astronote-retail-frontend.onrender.com';
     const frontendUrl = ensureRetailPath(baseUrl);
     const successUrl = `${frontendUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${frontendUrl}/billing/cancel`;
@@ -551,7 +551,7 @@ r.get('/subscriptions/portal', requireAuth, async (req, res, next) => {
     const portalUrl = await getCustomerPortalUrl({
       customerId: subscription.stripeCustomerId,
       returnUrl: (() => {
-        const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:8080';
+        const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'https://astronote-retail-frontend.onrender.com';
         if (baseUrl.includes('localhost')) {
           return `${baseUrl}/credits`;
         }
@@ -617,7 +617,7 @@ r.post('/billing/topup', requireAuth, async (req, res, next) => {
       return trimmed;
     };
     
-    const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:8080';
+    const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'https://astronote-retail-frontend.onrender.com';
     const frontendUrl = ensureRetailPath(baseUrl);
     const successUrl = `${frontendUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${frontendUrl}/billing/cancel`;
