@@ -126,11 +126,15 @@ exports.enqueueCampaign = async (campaignId) => {
     // Update status atomically
     const upd = await tx.campaign.updateMany({
       where: {
-        id: campaignId,
-        OR: [
-          { status: 'draft' },
-          { status: 'scheduled' },
-          { status: 'paused' },
+        AND: [
+          { id: campaignId },
+          {
+            OR: [
+              { status: 'draft' },
+              { status: 'scheduled' },
+              { status: 'paused' },
+            ],
+          },
         ],
       },
       data: { status: 'sending', startedAt: new Date() }

@@ -60,8 +60,15 @@ async function refreshCampaignStatuses(campaignId, ownerId) {
       where: {
         campaignId,
         ownerId,
-        status: { in: ['queued', 'sent'] },
-        providerMessageId: { not: null }
+        AND: [
+          {
+            OR: [
+              { status: 'queued' },
+              { status: 'sent' },
+            ],
+          },
+          { providerMessageId: { not: null } },
+        ],
       },
       select: {
         id: true,
@@ -169,8 +176,15 @@ async function refreshPendingStatuses(limit = 100) {
     // Find messages that need status refresh
     const messages = await prisma.campaignMessage.findMany({
       where: {
-        status: { in: ['queued', 'sent'] },
-        providerMessageId: { not: null }
+        AND: [
+          {
+            OR: [
+              { status: 'queued' },
+              { status: 'sent' },
+            ],
+          },
+          { providerMessageId: { not: null } },
+        ],
       },
       select: {
         id: true,
@@ -329,12 +343,19 @@ async function refreshBulkStatuses(bulkId, ownerId = null) {
     // Find all messages with this bulkId
     const where = {
       bulkId,
-      providerMessageId: { not: null },
-      status: { in: ['queued', 'sent'] }
+      AND: [
+        {
+          OR: [
+            { status: 'queued' },
+            { status: 'sent' },
+          ],
+        },
+        { providerMessageId: { not: null } },
+      ],
     };
     
     if (ownerId) {
-      where.ownerId = ownerId;
+      where.AND.push({ ownerId });
     }
 
     const messages = await prisma.campaignMessage.findMany({
