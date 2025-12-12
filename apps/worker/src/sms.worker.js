@@ -17,6 +17,7 @@ const { sendSingle } = require('../../api/src/services/mitto.service');
 const { sendBulkSMSWithCredits } = require('../../api/src/services/smsBulk.service');
 const { debit } = require('../../api/src/services/wallet.service');
 const { generateUnsubscribeToken } = require('../../api/src/services/token.service');
+const { shortenUrl, shortenUrlsInText } = require('../../api/src/services/urlShortener.service');
 
 // Helper function to ensure base URL includes /retail path
 function ensureRetailPath(url) {
@@ -102,7 +103,7 @@ async function processIndividualJob(messageId, job) {
 
     try {
       // Ensure unsubscribe link and offer link are present (safety check - should already be added in enqueue)
-      let finalText = msg.text;
+      let finalText = await shortenUrlsInText(msg.text); // Shorten any URLs in message
       let needsUnsubscribeLink = !finalText.includes('/unsubscribe/');
       let needsOfferLink = !finalText.includes('/o/');
 
@@ -111,7 +112,8 @@ async function processIndividualJob(messageId, job) {
         try {
           const unsubscribeToken = generateUnsubscribeToken(msg.contact.id, msg.campaign.ownerId, msg.campaign.id);
           const unsubscribeUrl = `${UNSUBSCRIBE_BASE_URL}/unsubscribe/${unsubscribeToken}`;
-          finalText += `\n\nTo unsubscribe, tap: ${unsubscribeUrl}`;
+          const shortenedUnsubscribeUrl = await shortenUrl(unsubscribeUrl);
+          finalText += `\n\nTo unsubscribe, tap: ${shortenedUnsubscribeUrl}`;
           logger.warn({ messageId: msg.id }, 'Unsubscribe link was missing, appended before send');
         } catch (tokenErr) {
           logger.error({ messageId: msg.id, err: tokenErr.message }, 'Failed to generate unsubscribe token, sending without link');
@@ -125,7 +127,8 @@ async function processIndividualJob(messageId, job) {
           const baseOfferUrl = process.env.OFFER_BASE_URL || process.env.FRONTEND_URL || 'https://astronote-retail-frontend.onrender.com';
           const OFFER_BASE_URL = ensureRetailPath(baseOfferUrl);
           const offerUrl = `${OFFER_BASE_URL}/o/${msg.trackingId}`;
-          finalText += `\n\nView offer: ${offerUrl}`;
+          const shortenedOfferUrl = await shortenUrl(offerUrl);
+          finalText += `\n\nView offer: ${shortenedOfferUrl}`;
           logger.warn({ messageId: msg.id }, 'Offer link was missing, appended before send');
         } catch (err) {
           logger.error({ messageId: msg.id, err: err.message }, 'Failed to append offer link');
@@ -259,9 +262,9 @@ async function processBatchJob(campaignId, ownerId, messageIds, job) {
     }, 'Processing batch job');
 
     // Prepare messages for bulk sending
-    const bulkMessages = messages.map(msg => {
+    const bulkMessages = await Promise.all(messages.map(async (msg) => {
       // Ensure unsubscribe link and offer link are present
-      let finalText = msg.text;
+      let finalText = await shortenUrlsInText(msg.text); // Shorten any URLs in message
       let needsUnsubscribeLink = !finalText.includes('/unsubscribe/');
       let needsOfferLink = !finalText.includes('/o/');
 
@@ -269,7 +272,8 @@ async function processBatchJob(campaignId, ownerId, messageIds, job) {
         try {
           const unsubscribeToken = generateUnsubscribeToken(msg.contact.id, msg.campaign.ownerId, msg.campaign.id);
           const unsubscribeUrl = `${UNSUBSCRIBE_BASE_URL}/unsubscribe/${unsubscribeToken}`;
-          finalText += `\n\nTo unsubscribe, tap: ${unsubscribeUrl}`;
+          const shortenedUnsubscribeUrl = await shortenUrl(unsubscribeUrl);
+          finalText += `\n\nTo unsubscribe, tap: ${shortenedUnsubscribeUrl}`;
         } catch (tokenErr) {
           logger.warn({ messageId: msg.id, err: tokenErr.message }, 'Failed to generate unsubscribe token');
         }
@@ -280,7 +284,8 @@ async function processBatchJob(campaignId, ownerId, messageIds, job) {
           const baseOfferUrl = process.env.OFFER_BASE_URL || process.env.FRONTEND_URL || 'https://astronote-retail-frontend.onrender.com';
           const OFFER_BASE_URL = ensureRetailPath(baseOfferUrl);
           const offerUrl = `${OFFER_BASE_URL}/o/${msg.trackingId}`;
-          finalText += `\n\nView offer: ${offerUrl}`;
+          const shortenedOfferUrl = await shortenUrl(offerUrl);
+          finalText += `\n\nView offer: ${shortenedOfferUrl}`;
         } catch (err) {
           logger.warn({ messageId: msg.id, err: err.message }, 'Failed to append offer link');
         }
@@ -299,7 +304,7 @@ async function processBatchJob(campaignId, ownerId, messageIds, job) {
           messageId: msg.id
         }
       };
-    });
+    }));
 
     // Send bulk SMS
     const result = await sendBulkSMSWithCredits(bulkMessages);

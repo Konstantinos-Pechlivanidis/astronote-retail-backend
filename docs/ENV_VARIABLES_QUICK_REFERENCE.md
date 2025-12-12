@@ -70,6 +70,12 @@ MITTO_SENDER=YourSenderName
 # Frontend URLs (fallback to FRONTEND_URL)
 UNSUBSCRIBE_BASE_URL=https://astronote-retail-frontend.onrender.com
 OFFER_BASE_URL=https://astronote-retail-frontend.onrender.com
+
+# URL Shortening Configuration
+URL_SHORTENER_TYPE=custom  # 'custom' (default), 'bitly', 'tinyurl', or 'none'
+URL_SHORTENER_BASE_URL=https://astronote-retail-frontend.onrender.com
+# BITLY_API_TOKEN=your_bitly_api_token  # Optional - for Bitly shortener
+# TINYURL_API_KEY=your_tinyurl_api_key  # Optional - for TinyURL shortener
 ```
 
 ---
