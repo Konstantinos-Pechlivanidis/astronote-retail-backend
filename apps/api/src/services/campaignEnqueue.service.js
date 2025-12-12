@@ -2,6 +2,7 @@
 const prisma = require('../lib/prisma');
 const { render } = require('../lib/template');
 const { generateUnsubscribeToken } = require('./token.service');
+const { shortenUrl, shortenUrlsInText } = require('./urlShortener.service');
 const crypto = require('node:crypto');
 const pino = require('pino');
 
@@ -158,22 +159,27 @@ exports.enqueueCampaign = async (campaignId) => {
   logger.debug({ campaignId: camp.id, contactCount: contacts.length }, 'Generating messages with tracking IDs and links');
 
   // Generate messages with offer and unsubscribe links appended
-  const messagesData = contacts.map((contact) => {
+  const messagesData = await Promise.all(contacts.map(async (contact) => {
     // Render message template
     let messageText = render(messageTemplate, contact);
+    
+    // Shorten any URLs in the message text first
+    messageText = await shortenUrlsInText(messageText);
     
     // Generate tracking ID for offer link
     const trackingId = newTrackingId();
     const offerUrl = `${OFFER_BASE_URL}/o/${trackingId}`;
+    const shortenedOfferUrl = await shortenUrl(offerUrl);
     
     // Generate unsubscribe token
     const unsubscribeToken = generateUnsubscribeToken(contact.id, ownerId, camp.id);
     const unsubscribeUrl = `${UNSUBSCRIBE_BASE_URL}/unsubscribe/${unsubscribeToken}`;
+    const shortenedUnsubscribeUrl = await shortenUrl(unsubscribeUrl);
     
-    // Append offer link and unsubscribe link to message
+    // Append offer link and unsubscribe link to message (with shortened URLs)
     // Format: [Personalized message]\n\nView offer: {url}\n\nTo unsubscribe, tap: {unsubscribeUrl}
-    messageText += `\n\nView offer: ${offerUrl}`;
-    messageText += `\n\nTo unsubscribe, tap: ${unsubscribeUrl}`;
+    messageText += `\n\nView offer: ${shortenedOfferUrl}`;
+    messageText += `\n\nTo unsubscribe, tap: ${shortenedUnsubscribeUrl}`;
     
     return {
       ownerId,
@@ -184,7 +190,7 @@ exports.enqueueCampaign = async (campaignId) => {
       trackingId,
       status: 'queued'
     };
-  });
+  }));
 
   try {
     // For large campaigns (>10k messages), batch the createMany operation
