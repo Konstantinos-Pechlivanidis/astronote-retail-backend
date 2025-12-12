@@ -3,6 +3,7 @@
 
 const prisma = require('../lib/prisma');
 const { sendSMSWithCredits } = require('./sms.service');
+const { shortenUrl } = require('./urlShortener.service');
 const { render } = require('../lib/template');
 const crypto = require('node:crypto');
 const pino = require('pino');
@@ -184,9 +185,10 @@ async function triggerWelcomeAutomation(ownerId, contact) {
   // Generate trackingId and offer link
   const trackingId = newTrackingId();
   const offerUrl = `${OFFER_BASE_URL}/o/${trackingId}`;
+  const shortenedOfferUrl = await shortenUrl(offerUrl);
   
-  // Append offer link to message
-  messageText += `\n\nView offer: ${offerUrl}`;
+  // Append offer link to message (with shortened URL)
+  messageText += `\n\nView offer: ${shortenedOfferUrl}`;
 
   // Get sender name (using resolveSender which handles user lookup internally)
   const { resolveSender } = require('./mitto.service');
@@ -415,9 +417,10 @@ async function processBirthdayAutomations() {
         // Generate trackingId and offer link
         const trackingId = newTrackingId();
         const offerUrl = `${OFFER_BASE_URL}/o/${trackingId}`;
+        const shortenedOfferUrl = await shortenUrl(offerUrl);
         
-        // Append offer link to message
-        messageText += `\n\nView offer: ${offerUrl}`;
+        // Append offer link to message (with shortened URL)
+        messageText += `\n\nView offer: ${shortenedOfferUrl}`;
 
         // Send SMS via Mitto with credit enforcement
         const result = await sendSMSWithCredits({

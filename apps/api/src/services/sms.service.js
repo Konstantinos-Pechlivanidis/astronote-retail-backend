@@ -4,6 +4,7 @@
 const { sendSingle } = require('./mitto.service');
 const { getBalance, debit } = require('./wallet.service');
 const { generateUnsubscribeToken } = require('./token.service');
+const { shortenUrl, shortenUrlsInText } = require('./urlShortener.service');
 const { isSubscriptionActive } = require('./subscription.service');
 const pino = require('pino');
 
@@ -62,13 +63,16 @@ async function sendSMSWithCredits({ ownerId, destination, text, sender, meta = {
     };
   }
 
-  // 3. Append unsubscribe link if contactId is provided (for automations)
-  let finalText = text;
+  // 3. Shorten any URLs in the message text first
+  let finalText = await shortenUrlsInText(text);
+
+  // 4. Append unsubscribe link if contactId is provided (for automations)
   if (contactId) {
     try {
       const unsubscribeToken = generateUnsubscribeToken(contactId, ownerId, meta.campaignId || null);
       const unsubscribeUrl = `${UNSUBSCRIBE_BASE_URL}/unsubscribe/${unsubscribeToken}`;
-      finalText += `\n\nTo unsubscribe, tap: ${unsubscribeUrl}`;
+      const shortenedUnsubscribeUrl = await shortenUrl(unsubscribeUrl);
+      finalText += `\n\nTo unsubscribe, tap: ${shortenedUnsubscribeUrl}`;
     } catch (tokenErr) {
       logger.warn({ ownerId, contactId, err: tokenErr.message }, 'Failed to generate unsubscribe token, sending without link');
       // Continue without unsubscribe link if token generation fails
